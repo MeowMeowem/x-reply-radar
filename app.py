@@ -30,6 +30,7 @@ from scraper import browser, news, x_mine, x_watch
 
 ROOT = config.ROOT
 env = config.env  # kept for scripts that import it from here
+DEMO = os.environ.get("RADAR_DEMO") == "1"  # scripts/demo.py: made-up data, never talk to X or an AI
 
 
 # ---------- logging ----------
@@ -94,6 +95,11 @@ def _bad(msg, code=400):
     raise HTTPException(status_code=code, detail=msg)
 
 
+def no_demo():
+    if DEMO:
+        _bad("demo_mode")
+
+
 FEED_KEYS = ("id", "author_name", "author_handle", "author_avatar", "text", "url", "created_at", "media_type",
              "views", "replies", "likes", "retweets", "quotes", "topic", "reply_a", "reply_b", "ai_want",
              "hot_score", "stage", "stage_key", "age_min", "growth_pct", "growth_window", "measured", "vpm", "parts",
@@ -104,8 +110,8 @@ def public(t):
     return {k: t.get(k) for k in FEED_KEYS}
 
 
-KIND_LABELS = {"zh": {"quote": "引用", "post": "原创", "reply": "回复"},
-               "en": {"quote": "Quote", "post": "Post", "reply": "Reply"}}
+KIND_LABELS = {"zh": {"quote": "引用", "post": "原创", "reply": "回复", "link": "分享链接"},
+               "en": {"quote": "Quote", "post": "Post", "reply": "Reply", "link": "Link post"}}
 
 
 LEGACY_KINDS = {"引用": "quote", "原创": "post", "短帖": "post", "中帖": "post", "长帖": "post"}
@@ -114,6 +120,8 @@ LEGACY_KINDS = {"引用": "quote", "原创": "post", "短帖": "post", "中帖":
 def public_draft(d):
     labels = KIND_LABELS[i18n.lang()]
     code = LEGACY_KINDS.get(d.get("kind"), d.get("kind") or "post")
+    if code == "quote" and not re.search(r"/status/\d+", d.get("url") or ""):
+        code = "link"  # an article can't be quoted on X; it's a post with the link
     return {**d, "kind_code": code, "kind": labels.get(code, code)}
 
 
@@ -124,7 +132,7 @@ def status():
     s.update(ai_ready=llm.ready(e), last_run=last[0] if last else None, channel=e.get("POST_CHANNEL"),
              fit_min=config.get_float(e, "FIT_MIN_SCORE"), ui_lang=e.get("UI_LANG"),
              x_ready=bool(browser.parse_cookie_config(e).get("auth_token")), handle=config.handle(e),
-             queue=jobs.queue_status(e))
+             queue=jobs.queue_status(e), demo=DEMO)
     s.pop("env_mtime_at_expiry", None)
     return s
 
@@ -154,6 +162,7 @@ def api_status():
 
 @app.post("/api/refresh")
 def refresh():
+    no_demo()
     if jobs.state["running"]:
         return {"started": False}
     bg(jobs.run_cycle, "manual")
@@ -187,6 +196,7 @@ class TweetRef(BaseModel):
 
 @app.post("/api/replies/regenerate")
 def api_regenerate(a: TweetRef):
+    no_demo()
     e = config.env()
     if not llm.ready(e):
         _bad("ai_not_ready")
@@ -213,6 +223,7 @@ class QuoteReq(BaseModel):
 
 @app.post("/api/quote/generate")
 def api_quote(a: QuoteReq):
+    no_demo()
     e = config.env()
     if not llm.ready(e):
         _bad("ai_not_ready")
@@ -244,6 +255,7 @@ class PostReq(BaseModel):
 
 @app.post("/api/post/generate")
 def api_post(a: PostReq):
+    no_demo()
     e = config.env()
     if not llm.ready(e):
         _bad("ai_not_ready")
@@ -262,6 +274,7 @@ class TextReq(BaseModel):
 
 @app.post("/api/polish")
 def api_polish(a: TextReq):
+    no_demo()
     e = config.env()
     if not llm.ready(e):
         _bad("ai_not_ready")
@@ -280,6 +293,7 @@ def api_drafts():
 
 @app.post("/api/drafts/generate")
 def api_make_drafts():
+    no_demo()
     if jobs.state["drafting"]:
         return {"started": False}
     bg(jobs.make_drafts, config.env())
@@ -310,11 +324,18 @@ class SendReq(BaseModel):
 
 
 def _enqueue(e, a: SendReq):
-    if a.kind not in publisher.KINDS:
+    no_demo()
+    if a.kind not in publisher.KINDS + ("link",):
         _bad("bad_kind")
     text = jobs.clean_text(a.text)
     if not text:
         _bad("empty")
+    if a.kind == "link":  # a post that shares an article: the link goes at the end
+        d = store.draft(a.draft_id) if a.draft_id else None
+        url = (d or {}).get("url") or ""
+        if url and url not in text:
+            text = f"{text}\n{url}"
+        a = SendReq(kind="post", text=text, draft_id=a.draft_id, ai_text=a.ai_text)
     target = None
     if a.kind in ("reply", "quote"):
         target = store.tweet(a.target_id or "")
@@ -426,6 +447,7 @@ def _locked_refresh(fn, key):
 
 @app.post("/api/trends/refresh")
 def api_trends_refresh():
+    no_demo()
     _locked_refresh(jobs.refresh_trends, "trends")
     return {"started": True}
 
@@ -440,6 +462,8 @@ def api_news():
 
 @app.post("/api/news/refresh")
 def api_news_refresh():
+    no_demo()
+
     def run():
         jobs.refresh_news(config.env(), force=True)
         jobs.phase("")
@@ -479,6 +503,7 @@ class LearnReq(BaseModel):
 
 @app.post("/api/learn/run")
 def api_learn_run(a: LearnReq):
+    no_demo()
     e = config.env()
     if a.task not in ("scrape_mine", "learn", "consolidate", "eval"):
         _bad("bad_task")
@@ -531,6 +556,7 @@ def api_profile(a: ProfileReq):
 
 @app.post("/api/import/archive")
 async def api_import_archive(file: UploadFile = File(...)):
+    no_demo()
     data = await file.read()
     if len(data) > 300 * 1024 * 1024:
         _bad("too_large", 413)
@@ -620,6 +646,7 @@ class TestReq(BaseModel):
 
 @app.post("/api/settings/test")
 def api_settings_test(a: TestReq):
+    no_demo()
     e = config.env()
     if a.what == "ai":
         try:

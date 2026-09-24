@@ -71,7 +71,7 @@ async function api(path, body, opts = {}) {
 function toast(msg, kind = "") {
   const el = h(`<div class="toast ${kind}">${esc(msg)}</div>`);
   $("#toasts").append(el);
-  setTimeout(() => el.remove(), kind === "err" ? 6000 : 2600);
+  setTimeout(() => el.remove(), kind === "err" ? 6000 : kind === "long" ? 9000 : 2600);
 }
 function toastLink(msg, url, label) {
   const el = h(`<div class="toast">${esc(msg)} <a href="${esc(safeUrl(url))}" target="_blank" rel="noopener noreferrer" style="color:inherit;font-weight:600">${esc(label)} ↗</a></div>`);
@@ -100,17 +100,22 @@ function autosize(ta) { ta.style.height = "auto"; ta.style.height = Math.min(ta.
 // ---------- sending ----------
 
 async function send(payload) {
+  if (S.status?.demo) throw new Error(t("err.demo_mode"));
   // intent: X opens in a new tab with the text filled in. Open the tab now, inside the click,
   // so popup blockers allow it; point it at X once the server answers.
   const intent = (S.status?.channel || "intent") === "intent";
   const win = intent ? window.open("about:blank", "_blank") : null;
+  // X has no "quote" link: the post opens instead, with your text on the clipboard to paste
+  const quoting = intent && payload.kind === "quote";
+  if (quoting) copy(payload.text);
   try {
     const r = await api("/api/send", payload);
     if (r.intent_url) {
       let w = win;
       if (!w) { w = window.open(r.intent_url, "_blank"); if (w) w.opener = null; }
       else { w.opener = null; w.location.href = r.intent_url; }
-      if (w) toast(t("toast.intent"));
+      const msg = quoting ? t("toast.quote_intent") : t("toast.intent");
+      if (w) toast(msg, quoting ? "long" : "");
       else toastLink(t("toast.popup_blocked"), r.intent_url, t("toast.open_x"));  // popup blocked: let a real click open it
     } else toast(t("toast.queued"));
     loadStatus();
@@ -131,7 +136,7 @@ function editor(d, { onDone } = {}) {
     <div class="editor">
       <div class="label"><span>${esc(t("kind." + kind))}${d.angle ? " · " + esc(d.angle) : ""}</span>${fitBadge(d.score)}</div>
       <textarea rows="1"></textarea>
-      ${d.url ? `<div class="basis">${esc(t("draft.quoting"))}: <a class="link" target="_blank" rel="noopener noreferrer" href="${esc(safeUrl(d.url))}">${esc(d.source || d.url)}</a></div>` : ""}
+      ${d.url ? `<div class="basis">${esc(t(kind === "link" ? "draft.source" : "draft.quoting"))}: <a class="link" target="_blank" rel="noopener noreferrer" href="${esc(safeUrl(d.url))}">${esc(d.source || d.url)}</a></div>` : ""}
       ${d.based_on ? `<div class="basis">${esc(d.based_on)}</div>` : ""}
       <div class="row">
         <span class="count"></span>
@@ -148,7 +153,8 @@ function editor(d, { onDone } = {}) {
   // what the AI wrote, so an edit before sending becomes a learning signal (your own text has none)
   let aiText = d.id ? (d.original || d.text) : null;
   const count = $(".count", el);
-  const update = () => { const n = xlen(ta.value); count.textContent = `${n} / 280`; count.classList.toggle("over", n > 280); autosize(ta); };
+  const extra = kind === "link" && d.url ? 24 : 0;  // the link added at the end counts as 23 + a line break
+  const update = () => { const n = xlen(ta.value) + extra; count.textContent = `${n} / 280`; count.classList.toggle("over", n > 280); autosize(ta); };
   ta.addEventListener("input", update);
   requestAnimationFrame(update);
   $$("[data-do]", el).forEach((b) => b.addEventListener("click", () => {
@@ -496,7 +502,7 @@ views.queue = {
       if (link) foot.append(h(`<a href="${esc(link)}" target="_blank" rel="noopener noreferrer">${esc(t("queue.view"))} ↗</a>`));
       if (it.status === "opened") {
         const again = h(`<button>${esc(t("queue.reopen"))}</button>`);
-        again.onclick = () => window.open(intentUrl(it), "_blank", "noopener");
+        again.onclick = () => { if (it.kind === "quote") copy(it.text); window.open(intentUrl(it), "_blank", "noopener"); };
         foot.append(again);
         btn(t("queue.confirm"), "confirm", "go"); btn(t("queue.not_sent"), "not_sent");
       }
@@ -508,6 +514,7 @@ views.queue = {
   },
 };
 function intentUrl(it) {
+  if (it.kind === "quote" && it.target_url) return it.target_url;  // quote: open the post, Repost > Quote
   const p = new URLSearchParams({ text: it.text });
   if (it.kind === "reply" && it.target_id) p.set("in_reply_to", it.target_id);
   if (it.kind === "quote" && it.target_url) p.set("url", it.target_url);
@@ -535,7 +542,7 @@ views.learn = {
     const running = r.state.learning ? t("learn.task." + r.state.task) : "";
     const acts = h(`
       <div>
-        <p class="sub">${esc(src || t("learn.no_posts"))}${running ? ` · <span class="warn spin">${esc(running)}</span>` : ""}</p>
+        <p class="sub" style="margin-top:10px">${esc(src || t("learn.no_posts"))}${running ? ` · <span class="warn spin">${esc(running)}</span>` : ""}</p>
         <div class="actions">
           <button class="pill" data-t="scrape_mine">${esc(t("learn.scrape"))}</button>
           <label class="pill" style="cursor:pointer">${esc(t("learn.import"))}<input type="file" accept=".zip,.js,application/zip,text/javascript" hidden></label>
@@ -649,22 +656,40 @@ const SECTIONS = [
   ["x", ["MY_HANDLE", "DISPLAY_NAME"]],
   ["ai", ["AI_BASE_URL", "AI_API_KEY", "AI_MODEL"]],
   ["post", ["POST_CHANNEL", "SEND_MIN_INTERVAL_SEC", "SEND_MAX_PER_HOUR", "SEND_MAX_PER_DAY", "X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_TOKEN_SECRET"]],
-  ["general", ["UI_LANG", "CONTENT_LANG"]],
-  ["radar", ["AUTO_REFRESH", "REFRESH_MIN_MINUTES", "REFRESH_MAX_MINUTES", "SCRAPE_TARGET", "SHOW_TOP", "RECHECK_TOP", "KEEP_DAYS", "TRENDS_EVERY_MINUTES", "WATCH_EVERY_MINUTES"]],
-  ["learn", ["FIT_REVIEW", "FIT_MIN_SCORE", "MINE_REFRESH_HOURS", "MINE_SCROLLS", "CONSOLIDATE_EVERY_DAYS", "EVAL_SAMPLES"]],
+  ["radar", ["AUTO_REFRESH", "REFRESH_MIN_MINUTES", "REFRESH_MAX_MINUTES", "SHOW_TOP", "SCRAPE_TARGET", "RECHECK_TOP", "TRENDS_EVERY_MINUTES", "WATCH_EVERY_MINUTES", "KEEP_DAYS"]],
+  ["learn", ["FIT_REVIEW", "FIT_MIN_SCORE", "CONSOLIDATE_EVERY_DAYS", "EVAL_SAMPLES", "MINE_REFRESH_HOURS", "MINE_SCROLLS"]],
   ["drafts", ["DRAFT_HOUR", "NEWS_PER_DAY", "QUOTE_MIN_SCORE"]],
+  ["general", ["UI_LANG", "CONTENT_LANG"]],
+  ["mutes", []],
 ];
+const PAIRS = { REFRESH_MIN_MINUTES: "REFRESH_MAX_MINUTES" };  // one row: "6 – 10 minutes"
+const UNITS = {
+  SEND_MIN_INTERVAL_SEC: "sec", SEND_MAX_PER_HOUR: "posts", SEND_MAX_PER_DAY: "posts", REFRESH_MIN_MINUTES: "min",
+  SHOW_TOP: "posts", SCRAPE_TARGET: "posts", RECHECK_TOP: "posts", TRENDS_EVERY_MINUTES: "min", WATCH_EVERY_MINUTES: "min",
+  KEEP_DAYS: "day", CONSOLIDATE_EVERY_DAYS: "day", EVAL_SAMPLES: "posts", MINE_REFRESH_HOURS: "hour", MINE_SCROLLS: "screens",
+  DRAFT_HOUR: "oclock", NEWS_PER_DAY: "posts", FIT_MIN_SCORE: "points", QUOTE_MIN_SCORE: "points",
+};
+const HIDDEN_IN_PAIR = new Set(Object.values(PAIRS));
 
-function field(key, meta) {
-  const help = I18N[S.lang]["set." + key + ".help"] ? `<div class="help">${t("set." + key + ".help")}</div>` : "";
+function control(key, meta, vals) {
   const id = "f_" + key;
-  let input;
-  if (meta.kind === "bool") input = `<label class="toggle"><input id="${id}" type="checkbox" ${meta.value === "1" ? "checked" : ""}> ${esc(t("common.on"))}</label>`;
-  else if (key === "POST_CHANNEL") input = `<div class="choices">${meta.choices.map((c) => `<label class="choice"><input type="radio" name="${id}" value="${c}" ${meta.value === c ? "checked" : ""}><div><b>${esc(t("channel." + c))}</b><span>${esc(t("channel." + c + ".help"))}</span></div></label>`).join("")}</div>`;
-  else if (meta.kind === "choice") input = `<select id="${id}">${meta.choices.map((c) => `<option value="${c}" ${meta.value === c ? "selected" : ""}>${esc(t("choice." + key + "." + c))}</option>`).join("")}</select>`;
-  else if (meta.kind === "secret") input = `<input id="${id}" type="password" autocomplete="off" placeholder="${esc(meta.set ? t("set.secret_set", { hint: meta.hint }) : t("set.secret_empty"))}">`;
-  else input = `<input id="${id}" type="${meta.kind === "int" || meta.kind === "float" ? "number" : "text"}" ${meta.kind === "float" ? 'step="0.5"' : ""} value="${esc(meta.value)}">`;
-  return `<div class="field" data-key="${key}"><label for="${id}">${esc(t("set." + key))}</label><div>${input}</div>${help}</div>`;
+  if (meta.kind === "bool") return `<label class="switch"><input id="${id}" type="checkbox" ${meta.value === "1" ? "checked" : ""}><span></span></label>`;
+  if (key === "POST_CHANNEL") return `<div class="choices">${meta.choices.map((c) => `<label class="choice"><input type="radio" name="${id}" value="${c}" ${meta.value === c ? "checked" : ""}><div><b>${esc(t("channel." + c))}</b><span>${esc(t("channel." + c + ".help"))}</span></div></label>`).join("")}</div>`;
+  if (meta.kind === "choice") return `<select id="${id}">${meta.choices.map((c) => `<option value="${c}" ${meta.value === c ? "selected" : ""}>${esc(t("choice." + key + "." + c))}</option>`).join("")}</select>`;
+  if (meta.kind === "secret") return `<input id="${id}" type="password" autocomplete="off" placeholder="${esc(meta.set ? t("set.secret_set", { hint: meta.hint }) : t("set.secret_empty"))}">`;
+  if (meta.kind === "int" || meta.kind === "float") {
+    const box = (k, m) => `<input id="f_${k}" type="number" class="short" ${m.kind === "float" ? 'step="0.5"' : 'step="1"'} value="${esc(m.value)}">`;
+    const unit = UNITS[key] ? `<em>${esc(t("unit." + UNITS[key]))}</em>` : "";
+    const pair = PAIRS[key] && vals[PAIRS[key]] ? `<span class="dash">–</span>${box(PAIRS[key], vals[PAIRS[key]])}` : "";
+    return `<span class="num">${box(key, meta)}${pair}${unit}</span>`;
+  }
+  return `<input id="${id}" type="text" value="${esc(meta.value)}">`;
+}
+function settingRow(key, meta, vals) {
+  const label = PAIRS[key] ? t("set." + key + ".pair") : t("set." + key);
+  const help = I18N[S.lang]["set." + key + ".help"] ? `<p>${t("set." + key + ".help")}</p>` : "";
+  const wide = key === "POST_CHANNEL" ? " wide" : "";
+  return `<div class="srow${wide}" data-key="${key}"><div class="slabel"><label for="f_${key}">${esc(label)}</label>${help}</div><div class="sctl">${control(key, meta, vals)}</div></div>`;
 }
 function readField(box, key, meta) {
   const id = "f_" + key;
@@ -673,86 +698,123 @@ function readField(box, key, meta) {
   return $("#" + id, box).value;
 }
 
+let settingsSection = "x";
+try { settingsSection = localStorage.getItem("settingsSection") || "x"; } catch {}
+
 views.settings = {
   async load() {
     const r = await api("/api/settings");
     const vals = r.values, st = r.setup;
     const main = $("#view");
-    const steps = [
-      ["x", st.x && !st.login_expired, "x"], ["ai", st.ai, "ai"], ["handle", st.handle, "x"],
-      ["persona", st.persona, "learn"], ["mine", st.mine > 0, "learn"],
-    ];
-    const stepsEl = h(`<div class="steps">${steps.map(([k, ok, go]) => `<div class="step ${ok ? "is-done" : "is-todo"}"><span class="mark">${ok ? "✓" : "○"}</span><span>${esc(t("setup." + k))}</span>${ok ? "" : `<button data-jump="${go}">${esc(t("setup.go"))}</button>`}</div>`).join("")}</div>`);
-    $$("[data-jump]", stepsEl).forEach((b) => (b.onclick = () => { const go = b.dataset.jump; if (go === "learn") setView("learn"); else document.getElementById("sec_" + go)?.scrollIntoView({ behavior: "smooth" }); }));
-
-    const blocks = [];
-    for (const [sec, keys] of SECTIONS) {
-      const fs = h(`<fieldset id="sec_${sec}"><legend>${esc(t("sec." + sec))}</legend></fieldset>`);
-      if (sec === "x") fs.append(xCookieBlock(st));
-      if (sec === "ai") {
-        const pre = h(`<div class="field"><label>${esc(t("set.preset"))}</label><div><select><option value="">${esc(t("set.preset_pick"))}</option>${AI_PRESETS.map(([n]) => `<option value="${n}">${esc(t("preset." + n))}</option>`).join("")}</select></div></div>`);
-        $("select", pre).onchange = (e) => { const p = AI_PRESETS.find((x) => x[0] === e.target.value); if (!p) return; $("#f_AI_BASE_URL", fs).value = p[1]; if (!$("#f_AI_MODEL", fs).value) $("#f_AI_MODEL", fs).value = p[2]; };
-        fs.append(pre);
-      }
-      for (const k of keys) if (vals[k]) fs.insertAdjacentHTML("beforeend", field(k, vals[k]));
-      const row = h(`<div class="formrow"><span class="result"></span>${sec === "ai" ? `<button class="pill" data-test="ai">${esc(t("set.test"))}</button>` : ""}${sec === "post" ? `<button class="pill" data-test="api">${esc(t("set.test_api"))}</button>` : ""}<button class="pill primary" data-save>${esc(t("common.save"))}</button></div>`);
-      fs.append(row);
-      $("[data-save]", row).onclick = (e) => guard(e.currentTarget, async () => {
-        const values = {};
-        for (const k of keys) if (vals[k]) values[k] = readField(fs, k, vals[k]);
-        await api("/api/settings", { values });
-        toast(t("common.saved"));
-        if ("UI_LANG" in values) { await applyLang(); }
-        await loadStatus(); views.settings.load();
-      });
-      $$("[data-test]", row).forEach((b) => (b.onclick = () => guard(b, async () => {
-        const res = await api("/api/settings/test", { what: b.dataset.test });
-        const out = $(".result", row);
-        out.className = "result " + (res.ok ? "ok" : "bad");
-        out.textContent = (res.ok ? "✓ " : "✗ ") + (I18N[S.lang]["err." + res.detail] ? t("err." + res.detail) : res.detail || "");
-      })));
-      if (sec === "post") {
-        const toggleApi = () => { const ch = readField(fs, "POST_CHANNEL", vals.POST_CHANNEL); $$('[data-key^="X_A"]', fs).forEach((f) => (f.hidden = ch !== "api")); $('[data-test="api"]', fs).hidden = ch !== "api"; };
-        $$('input[name="f_POST_CHANNEL"]', fs).forEach((i) => (i.onchange = toggleApi)); toggleApi();
-      }
-      blocks.push(fs);
-    }
-    const mutes = await api("/api/mutes");
-    const mfs = h(`<fieldset><legend>${esc(t("sec.mutes"))}</legend><div class="list"></div></fieldset>`);
-    if (!mutes.items.length) $(".list", mfs).append(h(`<p class="sub" style="margin:4px 0">${esc(t("mutes.empty"))}</p>`));
-    for (const m of mutes.items) {
-      const row = h(`<div class="item" style="padding:8px 0"><div class="body">${esc(t("mutes." + m.kind))}: <b>${esc(m.value)}</b></div><button class="link">${esc(t("mutes.remove"))}</button></div>`);
-      $("button", row).onclick = () => guard($("button", row), async () => { await api("/api/feedback", { kind: "unmute_" + m.kind, value: m.value }); row.remove(); });
-      $(".list", mfs).append(row);
-    }
-    main.replaceChildren(h(`<h2>${esc(t("setup.title"))}</h2>`), stepsEl, h(`<h2>${esc(t("settings.title"))}</h2>`), ...blocks, mfs,
-      h(`<p class="sub">${esc(t("settings.local"))}</p>`));
+    const dot = { x: st.x && !st.login_expired ? "ok" : st.x ? "bad" : "warn", ai: st.ai ? "ok" : "warn",
+                  post: vals.POST_CHANNEL.value === "api" && !vals.X_API_KEY.set ? "warn" : "" };
+    const steps = [["x", st.x && !st.login_expired, "x"], ["ai", st.ai, "ai"], ["handle", st.handle, "x"],
+                   ["persona", st.persona, "learn"], ["mine", st.mine > 0, "learn"]];
+    const todo = steps.filter(([, ok]) => !ok);
+    const setup = todo.length ? h(`<div class="setup"><b>${esc(t("setup.title"))}</b>${steps.map(([k, ok, go]) => `<button class="${ok ? "is-done" : ""}" data-jump="${go}" ${ok ? "disabled" : ""}><span>${ok ? "✓" : "○"}</span>${esc(t("setup." + k))}</button>`).join("")}</div>`) : null;
+    const nav = h(`<nav class="snav" aria-label="${esc(t("settings.title"))}">${SECTIONS.map(([sec]) => `<button data-sec="${sec}"><span>${esc(t("sec." + sec))}</span>${dot[sec] ? `<i class="st ${dot[sec]}"></i>` : ""}</button>`).join("")}</nav>`);
+    const holder = h(`<div class="spanel"></div>`);
+    const show = async (sec) => {
+      if (!SECTIONS.some(([s]) => s === sec)) sec = "x";
+      settingsSection = sec;
+      try { localStorage.setItem("settingsSection", sec); } catch {}
+      $$("button", nav).forEach((b) => b.setAttribute("aria-current", b.dataset.sec === sec));
+      holder.replaceChildren(await settingsPanel(sec, vals, st));
+    };
+    $$("button", nav).forEach((b) => (b.onclick = () => show(b.dataset.sec)));
+    if (setup) $$("[data-jump]", setup).forEach((b) => (b.onclick = () => (b.dataset.jump === "learn" ? setView("learn") : show(b.dataset.jump))));
+    main.replaceChildren(...[setup, h(`<div class="settings"></div>`)].filter(Boolean));
+    $(".settings", main).append(nav, holder);
+    await show(settingsSection);
   },
 };
 
-function xCookieBlock(st) {
+async function settingsPanel(sec, vals, st) {
+  const keys = SECTIONS.find(([s]) => s === sec)[1];
+  const panel = h(`<section class="panel"><header><h3>${esc(t("sec." + sec))}</h3><p class="sub">${esc(t("sec." + sec + ".desc"))}</p></header></section>`);
+  if (sec === "mutes") {
+    const mutes = await api("/api/mutes");
+    if (!mutes.items.length) panel.append(h(`<p class="sub">${esc(t("mutes.empty"))}</p>`));
+    for (const m of mutes.items) {
+      const row = h(`<div class="srow"><div class="slabel"><label>${esc(m.value)}</label><p>${esc(t("mutes." + m.kind))}</p></div><div class="sctl right"><button class="pill small">${esc(t("mutes.remove"))}</button></div></div>`);
+      $("button", row).onclick = (e) => guard(e.currentTarget, async () => { await api("/api/feedback", { kind: "unmute_" + m.kind, value: m.value }); row.remove(); });
+      panel.append(row);
+    }
+    return panel;
+  }
+  if (sec === "x") panel.append(xAccountBlock(st));
+  if (sec === "ai") {
+    panel.append(h(`<div class="srow"><div class="slabel"><label for="preset">${esc(t("set.preset"))}</label></div><div class="sctl"><select id="preset"><option value="">${esc(t("set.preset_pick"))}</option>${AI_PRESETS.map(([n]) => `<option value="${n}">${esc(t("preset." + n))}</option>`).join("")}</select></div></div>`));
+  }
+  for (const k of keys) if (vals[k] && !HIDDEN_IN_PAIR.has(k)) panel.insertAdjacentHTML("beforeend", settingRow(k, vals[k], vals));
+  const foot = h(`<footer><span class="result"></span>${sec === "ai" ? `<button class="pill" data-test="ai">${esc(t("set.test"))}</button>` : ""}${sec === "post" ? `<button class="pill" data-test="api">${esc(t("set.test_api"))}</button>` : ""}<button class="pill primary" data-save>${esc(t("common.save"))}</button></footer>`);
+  panel.append(foot, h(`<p class="note">${esc(t("settings.local"))}</p>`));
+
+  const preset = $("#preset", panel);
+  if (preset) preset.onchange = () => {
+    const p = AI_PRESETS.find((x) => x[0] === preset.value);
+    if (!p) return;
+    $("#f_AI_BASE_URL", panel).value = p[1];
+    if (!$("#f_AI_MODEL", panel).value) $("#f_AI_MODEL", panel).value = p[2];
+  };
+  if (sec === "post") {
+    const toggleApi = () => {
+      const api_ = readField(panel, "POST_CHANNEL", vals.POST_CHANNEL) === "api";
+      $$('[data-key^="X_A"]', panel).forEach((f) => (f.hidden = !api_));
+      $('[data-test="api"]', panel).hidden = !api_;
+    };
+    $$('input[name="f_POST_CHANNEL"]', panel).forEach((i) => (i.onchange = toggleApi));
+    toggleApi();
+  }
+  $("[data-save]", foot).onclick = (e) => guard(e.currentTarget, async () => {
+    const values = {};
+    for (const k of keys) if (vals[k]) values[k] = readField(panel, k, vals[k]);
+    await api("/api/settings", { values });
+    toast(t("common.saved"));
+    if ("UI_LANG" in values) await applyLang();
+    await loadStatus();
+    views.settings.load();
+  });
+  $$("[data-test]", foot).forEach((b) => (b.onclick = () => guard(b, async () => {
+    const res = await api("/api/settings/test", { what: b.dataset.test });
+    const out = $(".result", foot);
+    out.className = "result " + (res.ok ? "ok" : "bad");
+    out.textContent = (res.ok ? "✓ " : "✗ ") + (I18N[S.lang]["err." + res.detail] ? t("err." + res.detail) : res.detail || "");
+  })));
+  return panel;
+}
+
+function xAccountBlock(st) {
+  const state = st.x ? (st.login_expired ? "bad" : "ok") : "warn";
+  const label = st.x ? (st.login_expired ? t("x.expired") : t("x.saved_as", { handle: S.status?.handle ? "@" + S.status.handle : "" })) : t("x.none");
   const el = h(`
-    <div>
-      <p class="sub" style="margin:0 0 6px">${esc(st.x ? (st.login_expired ? t("x.expired") : t("x.saved")) : t("x.none"))}</p>
-      <details class="howto" ${st.x ? "" : "open"}><summary>${esc(t("x.howto"))}</summary>${t("x.howto_body")}</details>
-      <textarea rows="3" placeholder="${esc(t("x.paste_ph"))}" spellcheck="false"></textarea>
-      <div class="formrow"><span class="result"></span>${st.x ? `<button class="quiet" data-x="logout">${esc(t("x.logout"))}</button>` : ""}<button class="pill" data-x="test">${esc(t("x.test"))}</button><button class="pill primary" data-x="save">${esc(t("x.save"))}</button></div>
+    <div class="xacct">
+      <div class="xstate"><i class="st ${state}"></i><span>${esc(label)}</span><span class="result"></span>
+        <span class="acts">${st.x ? `<button class="quiet" data-x="logout">${esc(t("x.logout"))}</button><button class="pill small" data-x="test">${esc(t("x.test"))}</button><button class="pill small" data-x="toggle">${esc(t("x.update"))}</button>` : ""}</span>
+      </div>
+      <div class="xpaste" ${st.x && !st.login_expired ? "hidden" : ""}>
+        <details class="howto" ${st.x ? "" : "open"}><summary>${esc(t("x.howto"))}</summary>${t("x.howto_body")}</details>
+        <textarea rows="2" placeholder="${esc(t("x.paste_ph"))}" spellcheck="false"></textarea>
+        <div class="right"><button class="pill primary small" data-x="save">${esc(t("x.save"))}</button></div>
+      </div>
     </div>`);
   const out = $(".result", el);
+  const show = (res) => {
+    out.className = "result " + (res.ok ? "ok" : "bad");
+    out.textContent = res.ok ? t("x.ok", { handle: res.detail }) : (I18N[S.lang]["err." + res.detail] ? t("err." + res.detail) : res.detail);
+  };
   $('[data-x="save"]', el).onclick = (e) => guard(e.currentTarget, async () => {
     await api("/api/settings/cookie", { text: $("textarea", el).value });
-    $("textarea", el).value = ""; toast(t("x.saved_toast")); out.className = "result ok"; out.textContent = t("x.testing");
-    const res = await api("/api/settings/test", { what: "x" });
-    out.className = "result " + (res.ok ? "ok" : "bad");
-    out.textContent = res.ok ? t("x.ok", { handle: res.detail }) : (I18N[S.lang]["err." + res.detail] ? t("err." + res.detail) : res.detail);
-    loadStatus();
+    $("textarea", el).value = "";
+    out.className = "result"; out.textContent = t("x.testing");
+    show(await api("/api/settings/test", { what: "x" }));
+    await loadStatus();
+    setTimeout(() => views.settings.load(), 1200);
   });
-  $('[data-x="test"]', el).onclick = (e) => guard(e.currentTarget, async () => {
-    const res = await api("/api/settings/test", { what: "x" });
-    out.className = "result " + (res.ok ? "ok" : "bad");
-    out.textContent = res.ok ? t("x.ok", { handle: res.detail }) : (I18N[S.lang]["err." + res.detail] ? t("err." + res.detail) : res.detail);
-    loadStatus();
-  });
+  const test = $('[data-x="test"]', el);
+  if (test) test.onclick = () => guard(test, async () => { out.className = "result"; out.textContent = t("x.testing"); show(await api("/api/settings/test", { what: "x" })); loadStatus(); });
+  const toggle = $('[data-x="toggle"]', el);
+  if (toggle) toggle.onclick = () => { const p = $(".xpaste", el); p.hidden = !p.hidden; if (!p.hidden) $("textarea", el).focus(); };
   const lo = $('[data-x="logout"]', el);
   if (lo) lo.onclick = () => guard(lo, async () => { if (!confirm(t("x.logout_confirm"))) return; await api("/api/settings/logout-x", {}); views.settings.load(); loadStatus(); });
   return el;

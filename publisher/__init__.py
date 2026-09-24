@@ -22,11 +22,13 @@ class SendError(Exception):
 
 
 def intent_url(kind: str, text: str, target_id: str | None = None, target_url: str | None = None) -> str:
+    """Where to send you to finish by hand. X has no intent for quote posts, so a quote opens the post
+    itself (the text is on your clipboard; press Repost > Quote and paste)."""
+    if kind == "quote" and target_url:
+        return target_url
     params = {"text": text}
     if kind == "reply" and target_id:
         params["in_reply_to"] = target_id
-    if kind == "quote" and target_url:
-        params["url"] = target_url
     return "https://x.com/intent/post?" + urlencode(params)
 
 

@@ -25,8 +25,8 @@ def test_api_body():
 def test_intent_url():
     q = parse_qs(urlparse(publisher.intent_url("reply", "a b", "123")).query)
     assert q == {"text": ["a b"], "in_reply_to": ["123"]}
-    q = parse_qs(urlparse(publisher.intent_url("quote", "hi", "5", "https://x.com/a/status/5")).query)
-    assert q["url"] == ["https://x.com/a/status/5"]
+    # X has no quote intent: a quote opens the post itself (Repost > Quote)
+    assert publisher.intent_url("quote", "hi", "5", "https://x.com/a/status/5") == "https://x.com/a/status/5"
 
 
 def test_x_length():

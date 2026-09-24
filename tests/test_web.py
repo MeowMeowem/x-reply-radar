@@ -69,3 +69,24 @@ def test_batch_needs_automatic_channel(client):
 def test_ai_drafted_replies_are_not_learned_from(client):
     test_intent_send_and_confirm_records_learning(client)
     assert store.my_posts("reply") and not store.my_own_posts("reply")
+
+
+def test_link_post_appends_the_article(client):
+    [draft_id] = store.add_drafts([{"kind": "link", "text": "worth a read", "url": "https://example.com/a"}])
+    r = client.post("/api/send", json={"kind": "link", "text": "worth a read", "draft_id": draft_id})
+    assert r.status_code == 200
+    assert store.outbox_item(r.json()["id"])["text"] == "worth a read\nhttps://example.com/a"
+    assert store.outbox_item(r.json()["id"])["kind"] == "post"
+
+
+def test_article_quote_drafts_are_labelled_as_link_posts(client):
+    store.add_drafts([{"kind": "quote", "text": "t", "url": "https://example.com/a"},
+                      {"kind": "quote", "text": "t", "url": "https://x.com/a/status/5"}])
+    kinds = sorted(d["kind_code"] for d in client.get("/api/drafts").json()["items"])
+    assert kinds == ["link", "quote"]
+
+
+def test_demo_mode_never_sends(client, monkeypatch):
+    monkeypatch.setattr(app, "DEMO", True)
+    assert client.post("/api/send", json={"kind": "post", "text": "x"}).json()["detail"] == "demo_mode"
+    assert client.post("/api/refresh").status_code == 400

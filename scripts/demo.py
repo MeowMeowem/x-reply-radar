@@ -193,10 +193,19 @@ def seed(lang):
     store.upsert_news([{"url": f"https://example.com/news/{i}", "source": src, "title": title, "summary": summary,
                         "published": ago(hours=h)} for i, (src, title, summary, h) in enumerate(c["news"])])
 
-    store.add_drafts([{"kind": kind, "angle": angle, "text": text, "based_on": basis, "score": sc,
-                       "url": "https://example.com/news/0" if kind == "quote" else None,
-                       "source": f"{angle}｜{next((n[1] for n in c['news'] if n[0] == angle), '')}" if kind == "quote" else None}
-                      for kind, angle, text, basis, sc in c["drafts"]])
+    # one quote of a (made-up) post on X, one post sharing an article, one original post
+    watch_url = f"https://x.com/{c['watch'][0][1]}/status/1971000000000000000"
+    drafts = []
+    for n, (kind, angle, text, basis, sc) in enumerate(c["drafts"]):
+        d = {"kind": kind, "angle": angle, "text": text, "based_on": basis, "score": sc}
+        if kind == "quote" and n == 0:
+            d.update(url=watch_url, source=f"X @{c['watch'][0][1]}", target_id="1971000000000000000",
+                     target_author=c["watch"][0][1])
+        elif kind == "quote":
+            title = next((x[1] for x in c["news"] if x[0] == angle), "")
+            d.update(kind="link", url="https://example.com/news/3", source=f"{angle}｜{title}")
+        drafts.append(d)
+    store.add_drafts(drafts)
 
     # your own posts: replies with the post they answered, plus a few originals
     rnd = random.Random(7)
@@ -260,7 +269,7 @@ def main():
     ]) + "\n")
     os.environ.update(RADAR_DATA_DIR=str(demo / "data"), RADAR_PROFILE_DIR=str(demo / "profile"),
                       RADAR_LOG_DIR=str(demo / "logs"), RADAR_ENV_FILE=str(demo / ".env"), PORT=str(args.port),
-                      AUTO_REFRESH="0", SCRAPE_ON_START="0")
+                      AUTO_REFRESH="0", SCRAPE_ON_START="0", RADAR_DEMO="1")
     os.environ.setdefault("OPEN_BROWSER", "1")
     seed(args.lang)
     print(f"Demo ({args.lang}) on http://127.0.0.1:{args.port} — all data is made up.")

@@ -48,7 +48,7 @@ def quote_for(e, source: dict, log=print, save=True):
     if out.get("skip"):
         return None
     tweet = source.get("tweet") or {}
-    draft = {"kind": "quote", "angle": source["source"], "text": out["text"].strip(), "based_on": out.get("take") or "",
+    draft = {"kind": "quote" if is_tweet else "link", "angle": source["source"], "text": out["text"].strip(), "based_on": out.get("take") or "",
              "url": source["url"], "source": f"{source['source']}｜{title}"[:300], "facts": out.get("facts"),
              "target_id": tweet.get("id"), "target_author": tweet.get("author_handle")}
     if config.get_bool(e, "FIT_REVIEW"):
