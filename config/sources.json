@@ -1,0 +1,18 @@
+{
+  "note": "AI 前沿消息源。type: rss（RSS/Atom）、hf_papers（Hugging Face 每日论文）、links（网页列表页，按 pattern 抓文章链接）。filter 填了就只要标题/摘要命中这些词的。",
+  "sources": [
+    {"name": "OpenAI", "type": "rss", "url": "https://openai.com/news/rss.xml"},
+    {"name": "Anthropic", "type": "links", "url": "https://www.anthropic.com/news", "pattern": "href=\"(/news/[a-z0-9\\-]+)\"", "base": "https://www.anthropic.com", "limit": 6},
+    {"name": "Google DeepMind", "type": "rss", "url": "https://deepmind.google/blog/rss.xml"},
+    {"name": "Google AI", "type": "rss", "url": "https://blog.google/technology/ai/rss/"},
+    {"name": "Hugging Face 论文", "type": "hf_papers", "url": "https://huggingface.co/api/daily_papers", "limit": 8},
+    {"name": "Hugging Face", "type": "rss", "url": "https://huggingface.co/blog/feed.xml"},
+    {"name": "Hacker News", "type": "rss", "url": "https://hnrss.org/newest?q=AI+OR+LLM+OR+GPT+OR+Claude+OR+agent&points=100"},
+    {"name": "Simon Willison", "type": "rss", "url": "https://simonwillison.net/atom/entries/"},
+    {"name": "Latent Space", "type": "rss", "url": "https://www.latent.space/feed"},
+    {"name": "The Verge", "type": "rss", "url": "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml"},
+    {"name": "TechCrunch", "type": "rss", "url": "https://techcrunch.com/category/artificial-intelligence/feed/"},
+    {"name": "量子位", "type": "rss", "url": "https://www.qbitai.com/feed"},
+    {"name": "少数派", "type": "rss", "url": "https://sspai.com/feed", "filter": ["AI", "Claude", "GPT", "模型", "Agent", "智能"]}
+  ]
+}

@@ -1,0 +1,20 @@
+# your data, keys and profile never leave your computer
+.env
+.env.*
+!.env.example
+data/
+logs/
+profile/
+
+# environment
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+
+# personal launchers
+*.local.command
+启动热帖雷达.command
+配置Cookie.command

@@ -1,0 +1,12 @@
+Below are real posts and replies by the X user {{me}}.
+Using only this material, write two short sets of notes that another model will use to reply on their behalf:
+
+[My real background]
+Only facts that clearly appear in the posts and could come up naturally in replies (tools and plans they use, products they have built, things they tinker with).
+Don't guess anything that isn't there. One per line, at most 12.
+
+[How I talk]
+How they actually write: length, how they open, favorite words and interjections, punctuation and emoji habits, language mixing, whether they use concrete numbers, whether they complain or joke.
+Be specific and quote short phrases they really use. One per line, at most 12. Add 2-3 lines of "things they basically never say".
+
+Output only these two sections.

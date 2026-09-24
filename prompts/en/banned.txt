@@ -1,0 +1,15 @@
+# If generated text contains any of these, it is rewritten once. One per line, case-sensitive.
+game-changer
+game changer
+It's worth noting
+it's worth noting
+delve
+testament to
+In conclusion
+Let that sink in
+Great thread
+Thanks for sharing
+at the end of the day
+navigate the landscape
+unlock the power
+—

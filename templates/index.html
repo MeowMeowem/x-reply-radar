@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>X Reply Radar</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='none' stroke='%23c98fa5' stroke-width='3'/%3E%3Ccircle cx='16' cy='16' r='6' fill='%23968ac0'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header id="top">
+  <div class="bar">
+    <div class="brand"><span class="logo" aria-hidden="true"></span><b>Reply Radar</b><span id="me"></span></div>
+    <div class="side"><span id="updated" aria-live="polite"></span><button id="action" class="pill"></button></div>
+  </div>
+  <nav id="tabs" role="tablist"></nav>
+</header>
+<div id="notice" hidden></div>
+<main id="view" tabindex="-1"></main>
+<div id="batch" hidden></div>
+<div id="toasts" aria-live="polite"></div>
+<dialog id="modal"><div class="modal-body"></div><form method="dialog"><button class="pill" data-i18n="common.close"></button></form></dialog>
+<script src="/static/i18n.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

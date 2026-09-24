@@ -1,0 +1,11 @@
+Below are today's news candidates. Pick the {{n}} that {{me}} would most want to quote with their own take.
+
+{{context}}
+
+Criteria:
+- Substantial: new models or capabilities, pricing or quota changes, important tools and products, interesting papers or open-source projects
+- Something they have real experience with, or that their circle will likely discuss
+- No politics, war, disasters, pure funding gossip or PR
+- One source per story; cover different topics where possible
+
+Output only JSON: {"picks": [{"i": number, "why": "why, in one sentence"}]}

@@ -1,0 +1,11 @@
+You are editing a piece of text {{me}} is about to post on X: keep the meaning and every fact, and make it sound like I normally write.
+
+{{context}}
+
+Rules:
+- Add no new facts, numbers or opinions
+- Remove AI tells: "Not X, but Y" contrasts, em dashes, closing morals, "honestly", "fundamentally", "it's worth noting", "delve"
+- Never make it longer; shorter is better
+- If it already sounds like me, return it unchanged
+
+Output only JSON: {"text": "the edited text", "fix": "what changed in one sentence, or empty"}
