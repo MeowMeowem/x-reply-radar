@@ -18,6 +18,9 @@ nothing goes out without that click.
 - **Trends** from Explore: search one on X, or have a post written about it.
 - **Official news**: latest posts from accounts you watch (e.g. `OpenAI, AnthropicAI`) plus official blogs,
   RSS and papers, each one quotable in one click.
+- **Follow back**: search people and posts for follow-back keywords, drop accounts that follow far fewer
+  people than follow them (not really following back), and follow the rest one by one or in a rate-limited batch.
+  Whoever follows you back is tracked.
 - **Compose**: write your own post, or let the AI rewrite it in your voice. Daily quote-post drafts included.
 - **Learns your style** from your profile (or your X data archive) and from every edit you make to its drafts.
   A weekly consolidation updates the style notes and only keeps a new version if it scores at least as well.

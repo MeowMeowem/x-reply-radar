@@ -57,6 +57,15 @@ OPTIONS: tuple[Opt, ...] = (
     Opt("X_API_SECRET", "", "post", "secret"),
     Opt("X_ACCESS_TOKEN", "", "post", "secret"),
     Opt("X_ACCESS_TOKEN_SECRET", "", "post", "secret"),
+    # Follow-back finder
+    Opt("FOLLOW_KEYWORDS", "互关, 互粉, 互fo, 回关, 必回关, follow back, #followback, f4f", "follow"),
+    Opt("FOLLOW_MAX_RATIO", "1.2", "follow", "float"),
+    Opt("FOLLOW_MIN_FOLLOWING", "20", "follow", "int"),
+    Opt("FOLLOW_MIN_POSTS", "5", "follow", "int"),
+    Opt("FOLLOW_SEARCH_SCROLLS", "3", "follow", "int"),
+    Opt("FOLLOW_MIN_INTERVAL_SEC", "90", "follow", "int"),
+    Opt("FOLLOW_MAX_PER_HOUR", "10", "follow", "int"),
+    Opt("FOLLOW_MAX_PER_DAY", "30", "follow", "int"),
     # Radar
     Opt("AUTO_REFRESH", "1", "radar", "bool"),
     Opt("REFRESH_MIN_MINUTES", "6", "radar", "int"),
@@ -215,7 +224,8 @@ def example_env() -> str:
     """Body of .env.example, generated from OPTIONS so it never drifts."""
     titles = {"x": "X account (cookie from your logged-in browser)", "ai": "AI: any OpenAI-compatible API",
               "general": "Language", "post": "Posting (intent = opens X with the text filled in, you press Post)",
-              "radar": "Radar", "learn": "Style learning", "drafts": "Daily drafts", "server": "Server"}
+              "radar": "Radar", "learn": "Style learning", "drafts": "Daily drafts", "server": "Server",
+              "follow": "Follow-back finder (search, filter, follow)"}
     out, group = ["# Copy to .env, or fill everything in from the Settings page."], None
     for o in OPTIONS:
         if o.group != group:

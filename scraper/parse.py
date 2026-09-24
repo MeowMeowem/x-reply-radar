@@ -184,3 +184,56 @@ def trends(payloads):
             elif isinstance(o, list):
                 stack.extend(o)
     return out
+
+
+# ---------- users (for the follow-back finder) ----------
+
+def user_from_result(u: dict):
+    """A user profile from GraphQL, in the 2026 shape (core / relationship_counts / profile_bio) or the older
+    `legacy` shape."""
+    if not u or u.get("__typename") not in ("User", None):
+        return None
+    core, legacy = u.get("core") or {}, u.get("legacy") or {}
+    counts, rel = u.get("relationship_counts") or {}, u.get("relationship_perspectives") or {}
+    handle = core.get("screen_name") or legacy.get("screen_name")
+    uid = u.get("rest_id")
+    if not handle or not uid:
+        return None
+
+    def pick(*values):
+        return next((v for v in values if v is not None), None)
+
+    return {
+        "user_id": uid,
+        "handle": handle,
+        "name": core.get("name") or legacy.get("name") or handle,
+        "avatar": (u.get("avatar") or {}).get("image_url") or legacy.get("profile_image_url_https"),
+        "bio": ((u.get("profile_bio") or {}).get("description") or legacy.get("description") or "").strip(),
+        "followers": int(pick(counts.get("followers"), legacy.get("followers_count"), 0)),
+        "following": int(pick(counts.get("following"), legacy.get("friends_count"), 0)),
+        "posts": int(pick((u.get("tweet_counts") or {}).get("tweets"), legacy.get("statuses_count"), 0)),
+        "protected": bool(pick((u.get("privacy") or {}).get("protected"), legacy.get("protected"), False)),
+        "following_now": bool(pick(rel.get("following"), legacy.get("following"), False)),
+        "followed_by": bool(pick(rel.get("followed_by"), legacy.get("followed_by"), False)),
+        "verified": bool(u.get("is_blue_verified")),
+    }
+
+
+def users_in(payload):
+    """Users from a search payload: people results (matched on their profile) and the authors of posts."""
+    out = {}
+    for entry in entries(payload):
+        for ic in item_contents(entry):
+            if ic.get("__typename") == "TimelineUser" or ic.get("itemType") == "TimelineUser":
+                user = user_from_result((ic.get("user_results") or {}).get("result"))
+                if user:
+                    out.setdefault(user["user_id"], {**user, "source": "bio", "matched": user["bio"]})
+                continue
+            result = (ic.get("tweet_results") or {}).get("result") or {}
+            if result.get("__typename") == "TweetWithVisibilityResults":
+                result = result.get("tweet") or {}
+            author = user_from_result(((result.get("core") or {}).get("user_results") or {}).get("result"))
+            text = ((result.get("legacy") or {}).get("full_text") or "").strip()
+            if author and author["user_id"] not in out:
+                out[author["user_id"]] = {**author, "source": "post", "matched": text}
+    return list(out.values())

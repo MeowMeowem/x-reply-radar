@@ -25,7 +25,9 @@ import publisher
 import security
 import store
 from ai import llm, persona, posts, style
+from publisher import follow as follower
 from publisher import x_api
+from ranking import follow as follow_rules
 from scraper import browser, news, x_mine, x_watch
 
 ROOT = config.ROOT
@@ -132,7 +134,7 @@ def status():
     s.update(ai_ready=llm.ready(e), last_run=last[0] if last else None, channel=e.get("POST_CHANNEL"),
              fit_min=config.get_float(e, "FIT_MIN_SCORE"), ui_lang=e.get("UI_LANG"),
              x_ready=bool(browser.parse_cookie_config(e).get("auth_token")), handle=config.handle(e),
-             queue=jobs.queue_status(e), demo=DEMO)
+             queue=jobs.queue_status(e), follow_queue=jobs.follow_queue_status(e), demo=DEMO)
     s.pop("env_mtime_at_expiry", None)
     return s
 
@@ -470,6 +472,111 @@ def api_news_refresh():
     bg(run)
     _locked_refresh(jobs.refresh_watch, "watch")
     return {"started": True}
+
+
+# ---------- follow-back finder ----------
+
+@app.get("/api/follow")
+def api_follow():
+    e = config.env()
+    fresh = store.candidates(["new", "failed"], limit=1000)
+    ok, out = follow_rules.split(fresh, e)
+    done = store.candidates(["queued", "sending", "followed", "opened"], limit=200)
+    for c in done:
+        c["ratio"] = follow_rules.ratio(c)
+        c["diff"] = c["following"] - c["followers"]
+    return {"eligible": ok, "excluded": out[:150], "done": done, "stats": store.follow_stats(),
+            "queue": jobs.follow_queue_status(e), "keywords": follow_rules.keywords(e),
+            "searched_at": store.kv_get("follow_search_at"), "channel": e.get("POST_CHANNEL"),
+            "rules": {"max_ratio": config.get_float(e, "FOLLOW_MAX_RATIO"),
+                      "min_following": config.get_int(e, "FOLLOW_MIN_FOLLOWING"),
+                      "min_posts": config.get_int(e, "FOLLOW_MIN_POSTS")}}
+
+
+class FollowSearch(BaseModel):
+    keywords: str | None = None
+
+
+@app.post("/api/follow/search")
+def api_follow_search(a: FollowSearch):
+    no_demo()
+    e = config.env()
+    if a.keywords is not None:
+        config.save({"FOLLOW_KEYWORDS": a.keywords})
+        e = config.env()
+    words = follow_rules.keywords(e)
+    if not words:
+        _bad("no_keywords")
+    if jobs.state["task"] == "follow_search":
+        return {"started": False}
+    bg(jobs.run_follow_search, words)
+    return {"started": True}
+
+
+class FollowIds(BaseModel):
+    ids: list[str]
+
+
+@app.post("/api/follow/queue")
+def api_follow_queue(a: FollowIds):
+    """Queue people for following. Only eligible ones are accepted, whatever the browser sends."""
+    no_demo()
+    e = config.env()
+    channel = e.get("POST_CHANNEL") or "intent"
+    if channel == "intent":
+        _bad("batch_needs_auto_channel")
+    if channel == "api" and not x_api.configured(e):
+        _bad("api_not_configured")
+    if channel == "browser" and not browser.parse_cookie_config(e).get("auth_token"):
+        _bad("x_not_configured")
+    ok = []
+    for uid in a.ids[:200]:
+        c = store.candidate(uid)
+        if c and c["status"] in ("new", "failed") and follow_rules.evaluate(c, e)[0]:
+            ok.append(uid)
+    store.set_candidates(ok, status="queued", channel=channel, queued_at=store.now(), error=None)
+    jobs.wake_sender.set()
+    return {"queued": len(ok), "skipped": len(a.ids) - len(ok)}
+
+
+class FollowOne(BaseModel):
+    id: str
+
+
+@app.post("/api/follow/open")
+def api_follow_open(a: FollowOne):
+    """Follow one person yourself: returns X's follow page and remembers you opened it."""
+    no_demo()
+    c = store.candidate(a.id)
+    if not c:
+        _bad("not_found", 404)
+    store.set_candidates([a.id], status="opened", channel="intent", queued_at=store.now())
+    return {"intent_url": follower.intent_url(c["handle"])}
+
+
+class FollowAct(BaseModel):
+    ids: list[str]
+    action: str  # dismiss | cancel | restore | followed
+
+
+@app.post("/api/follow/act")
+def api_follow_act(a: FollowAct):
+    rows = [store.candidate(i) for i in a.ids[:300]]
+    rows = [r for r in rows if r]
+    if a.action == "dismiss":
+        store.set_candidates([r["user_id"] for r in rows if r["status"] in ("new", "failed", "opened")],
+                             status="dismissed")
+    elif a.action == "cancel":
+        store.set_candidates([r["user_id"] for r in rows if r["status"] == "queued"], status="new")
+    elif a.action == "followed":
+        store.set_candidates([r["user_id"] for r in rows if r["status"] == "opened"], status="followed",
+                             followed_at=store.now(), following_now=1)
+    elif a.action == "restore":
+        store.set_candidates([r["user_id"] for r in rows if r["status"] in ("dismissed", "opened", "failed")],
+                             status="new", error=None)
+    else:
+        _bad("bad_action")
+    return {"ok": True}
 
 
 # ---------- learning ----------

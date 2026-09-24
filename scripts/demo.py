@@ -243,6 +243,19 @@ def seed(lang):
             with store.conn() as db:
                 db.execute("UPDATE evals SET ts=? WHERE id=(SELECT MAX(id) FROM evals)", (ago(days=days, minutes=-2),))
 
+    # people asking for follow-backs: some worth following, some that only collect followers
+    people = [("maker_lin", "Lin builds", 820, 1340, True, "bio"), ("pixel_june", "June", 460, 910, False, "post"),
+              ("devnotes_kai", "Kai Notes", 2100, 2380, False, "bio"), ("tiny_saas_bo", "Bo", 150, 600, True, "bio"),
+              ("aiweekly_sam", "AI Weekly", 38000, 900, False, "bio"), ("growth_guru", "Growth Guru", 12500, 40, False, "post"),
+              ("newbie_01", "New here", 3, 8, False, "bio")]
+    bio = "互关 · 必回关 · 做独立产品" if lang == "zh" else "follow back 100% · building in public"
+    store.upsert_candidates([{"user_id": str(1980000000000000000 + i), "handle": h, "name": n, "avatar": None, "bio": bio,
+                              "followers": fr, "following": fg, "posts": 5 if h == "newbie_01" else 300, "protected": False,
+                              "verified": False, "following_now": False, "followed_by": fb, "source": src,
+                              "matched": bio, "keyword": "互关" if lang == "zh" else "follow back"}
+                             for i, (h, n, fr, fg, fb, src) in enumerate(people)])
+    store.set_candidates(["1980000000000000000"], status="followed", followed_at=ago(days=2))
+
     # a few sends in different states
     t0 = store.tweet("1970000000000000001")
     for status, text, kind, extra in [("sent", c["tweets"][1][7], "reply", {"result_id": "1970000000000009999"}),

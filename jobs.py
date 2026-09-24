@@ -18,7 +18,8 @@ import i18n
 import store
 from ai import llm, persona, posts, replies, review, style
 from ranking import score
-from scraper import browser, news, x_home, x_mine, x_trends, x_watch
+from ranking import follow as follow_rules
+from scraper import browser, news, x_follow, x_home, x_mine, x_trends, x_watch
 
 log = logging.getLogger("radar")
 
@@ -364,14 +365,110 @@ def record_sent(item, result_id=""):
     return e
 
 
+# ---------- follow-back finder ----------
+
+def run_follow_search(words=None):
+    """Search for people asking for follow-backs and store them with fresh numbers."""
+    e = config.env()
+    words = words or follow_rules.keywords(e)
+    if not words:
+        return False
+    set_state(task="follow_search")  # shown right away, also while waiting for the browser
+    if not cycle_lock.acquire(timeout=600):
+        set_state(task="")
+        return False
+    phase("follow_search", e)
+    try:
+        users = x_follow.search(e, words, log=say, scrolls=config.get_int(e, "FOLLOW_SEARCH_SCROLLS"))
+        new = store.upsert_candidates(users)
+        store.kv_set("follow_search_at", store.now())
+        say(f"follow search: {len(users)} found, {new} new")
+        return True
+    except browser.LoginExpired:
+        set_state(login_expired=True, env_mtime_at_expiry=config.env_mtime())
+        return False
+    except Exception as ex:
+        say(f"follow search failed: {type(ex).__name__}: {str(ex)[:200]}")
+        set_state(error=f"follow search: {str(ex)[:120]}")
+        return False
+    finally:
+        set_state(task="")
+        phase("")
+        cycle_lock.release()
+
+
+def follow_block_reason(e):
+    paused = float(store.kv_get("follow_paused_until", 0))
+    if time.time() < paused:
+        return "paused"
+    if store.followed_since(hours=1) >= config.get_int(e, "FOLLOW_MAX_PER_HOUR"):
+        return "hourly_limit"
+    if store.followed_since(days=1) >= config.get_int(e, "FOLLOW_MAX_PER_DAY"):
+        return "daily_limit"
+    if time.time() < float(store.kv_get("follow_next_at", 0)):
+        return "interval"
+    return None
+
+
+def follow_queue_status(e=None):
+    e = e or config.env()
+    reason = follow_block_reason(e)
+    wait = 0
+    if reason == "interval":
+        wait = int(float(store.kv_get("follow_next_at", 0)) - time.time())
+    elif reason == "paused":
+        wait = int(float(store.kv_get("follow_paused_until", 0)) - time.time())
+    return {"queued": len(store.candidates(["queued"])), "blocked": reason, "wait_sec": max(0, wait),
+            "hour": store.followed_since(hours=1), "day": store.followed_since(days=1),
+            "max_hour": config.get_int(e, "FOLLOW_MAX_PER_HOUR"), "max_day": config.get_int(e, "FOLLOW_MAX_PER_DAY")}
+
+
+def _follow_one(e):
+    from publisher import SendError
+    from publisher import follow as follower
+    c = store.next_follow()
+    if not c or follow_block_reason(e):
+        return False
+    store.set_candidates([c["user_id"]], status="sending", attempts=(c["attempts"] or 0) + 1)
+    try:
+        with cycle_lock if c["channel"] == "browser" else _nullcontext():
+            result = follower.follow(e, c)
+        if result == "dry_run":
+            store.set_candidates([c["user_id"]], status="new", error="dry run: follow button found, not pressed")
+        else:
+            store.set_candidates([c["user_id"]], status="followed", followed_at=store.now(), error=None,
+                                 following_now=1)
+            say(f"followed @{c['handle']} ({result})")
+    except browser.LoginExpired:
+        store.set_candidates([c["user_id"]], status="queued")
+        set_state(login_expired=True, env_mtime_at_expiry=config.env_mtime())
+        return False
+    except SendError as ex:
+        store.set_candidates([c["user_id"]], status="failed", error=str(ex)[:300])
+        if ex.retryable:  # X says we're following too fast: stop everything for a few hours
+            store.kv_set("follow_paused_until", time.time() + 3 * 3600)
+            say(f"follow paused for 3 hours: {ex}")
+        else:
+            say(f"follow @{c['handle']} failed: {ex}")
+    except Exception as ex:
+        store.set_candidates([c["user_id"]], status="failed", error=f"{type(ex).__name__}: {str(ex)[:250]}")
+    gap = config.get_int(e, "FOLLOW_MIN_INTERVAL_SEC")
+    store.kv_set("follow_next_at", time.time() + gap + random.uniform(0, gap * 0.7))  # never on a fixed beat
+    return True
+
+
 def sender():
     from publisher import SendError, send
     store.recover_sending()
+    store.set_candidates([c["user_id"] for c in store.candidates(["sending"])], status="failed",
+                         error="interrupted")
     while True:
         wake_sender.wait(timeout=15)
         wake_sender.clear()
         try:
             e = config.env()
+            if _follow_one(e):
+                wake_sender.set()
             item = store.next_pending()
             if not item:
                 continue

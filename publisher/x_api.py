@@ -90,3 +90,19 @@ def whoami(e) -> str:
     if r.status_code != 200:
         raise SendError(f"X API {r.status_code}: {r.text[:200]}")
     return "@" + str((r.json().get("data") or {}).get("username") or "?")
+
+
+_me = {}
+
+
+def my_id(e) -> str:
+    """Numeric id of the account the keys belong to (needed for the follow endpoint)."""
+    key = e.get("X_ACCESS_TOKEN", "")
+    if key not in _me:
+        url = "https://api.x.com/2/users/me"
+        auth = oauth1_header("GET", url, *(e[k].strip() for k in KEYS))
+        r = httpx.get(url, headers={"Authorization": auth}, timeout=20)
+        if r.status_code != 200:
+            raise SendError(f"X API {r.status_code}: {r.text[:200]}")
+        _me[key] = str(r.json()["data"]["id"])
+    return _me[key]

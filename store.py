@@ -65,6 +65,14 @@ CREATE TABLE IF NOT EXISTS evals (
   id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, version_id INTEGER, label TEXT, model TEXT,
   n INTEGER, score_a REAL, score_b REAL, score REAL, detail TEXT
 );
+CREATE TABLE IF NOT EXISTS follow_candidates (
+  user_id TEXT PRIMARY KEY, handle TEXT, name TEXT, avatar TEXT, bio TEXT,
+  followers INTEGER, following INTEGER, posts INTEGER, protected INTEGER, verified INTEGER,
+  following_now INTEGER, followed_by INTEGER, source TEXT, matched TEXT, keyword TEXT,
+  found_at TEXT, seen_at TEXT, status TEXT DEFAULT 'new', channel TEXT, error TEXT, attempts INTEGER DEFAULT 0,
+  queued_at TEXT, followed_at TEXT, followed_back_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_follow_status ON follow_candidates(status, found_at);
 CREATE TABLE IF NOT EXISTS trends (
   name TEXT, context TEXT, posts TEXT, rank INTEGER, fetched_at TEXT
 );
@@ -534,6 +542,91 @@ def fit_stats(days=7):
     return {"a": round(r[0], 2) if r[0] else None, "b": round(r[1], 2) if r[1] else None, "n": r[2]}
 
 
+# ---------- follow-back finder ----------
+# status: new -> queued -> sending -> followed | failed;  opened (you followed on X yourself);  dismissed
+
+def upsert_candidates(users, keyword=""):
+    """Fresh numbers for everyone found. A user you now follow is marked followed; one who follows you back
+    after you followed them gets followed_back_at."""
+    ts = now()
+    new = 0
+    with _lock, conn() as c:
+        for u in users:
+            row = c.execute("SELECT status, followed_back_at FROM follow_candidates WHERE user_id=?",
+                            (u["user_id"],)).fetchone()
+            vals = (u["handle"], u["name"], u.get("avatar"), u.get("bio", ""), u["followers"], u["following"],
+                    u["posts"], int(u["protected"]), int(u.get("verified", False)), int(u["following_now"]),
+                    int(u["followed_by"]))
+            if row is None:
+                new += 1
+                status = "followed" if u["following_now"] else "new"
+                c.execute("INSERT INTO follow_candidates (handle, name, avatar, bio, followers, following, posts,"
+                          " protected, verified, following_now, followed_by, user_id, source, matched, keyword,"
+                          " found_at, seen_at, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                          (*vals, u["user_id"], u.get("source"), (u.get("matched") or "")[:500],
+                           u.get("keyword") or keyword, ts, ts, status))
+                continue
+            status = row["status"]
+            if u["following_now"] and status in ("new", "opened", "queued", "failed"):
+                status = "followed"
+            back = row["followed_back_at"] or (ts if u["followed_by"] and status == "followed" else None)
+            c.execute("UPDATE follow_candidates SET handle=?, name=?, avatar=?, bio=?, followers=?, following=?,"
+                      " posts=?, protected=?, verified=?, following_now=?, followed_by=?, seen_at=?, status=?,"
+                      " followed_back_at=? WHERE user_id=?", (*vals, ts, status, back, u["user_id"]))
+    return new
+
+
+def candidates(statuses=None, limit=300):
+    q = "SELECT * FROM follow_candidates"
+    args = []
+    if statuses:
+        q += f" WHERE status IN ({','.join('?' * len(statuses))})"
+        args = list(statuses)
+    q += " ORDER BY followed_by DESC, found_at DESC LIMIT ?"
+    with conn() as c:
+        return [dict(r) for r in c.execute(q, (*args, limit))]
+
+
+def candidate(user_id):
+    with conn() as c:
+        r = c.execute("SELECT * FROM follow_candidates WHERE user_id=?", (user_id,)).fetchone()
+        return dict(r) if r else None
+
+
+def set_candidates(user_ids, **fields):
+    if not user_ids or not fields:
+        return
+    cols = ", ".join(f"{k}=?" for k in fields)
+    with _lock, conn() as c:
+        c.executemany(f"UPDATE follow_candidates SET {cols} WHERE user_id=?",
+                      [(*fields.values(), uid) for uid in user_ids])
+
+
+def next_follow():
+    with conn() as c:
+        r = c.execute("SELECT * FROM follow_candidates WHERE status='queued' ORDER BY queued_at LIMIT 1").fetchone()
+        return dict(r) if r else None
+
+
+def followed_since(**kw):
+    with conn() as c:
+        return c.execute("SELECT COUNT(*) FROM follow_candidates WHERE status='followed' AND followed_at > ?",
+                         (_ago(**kw),)).fetchone()[0]
+
+
+def last_followed_at():
+    with conn() as c:
+        return c.execute("SELECT MAX(followed_at) FROM follow_candidates WHERE status='followed'").fetchone()[0]
+
+
+def follow_stats():
+    with conn() as c:
+        rows = {r[0]: r[1] for r in c.execute("SELECT status, COUNT(*) FROM follow_candidates GROUP BY status")}
+        back = c.execute("SELECT COUNT(*) FROM follow_candidates WHERE status='followed' AND followed_at IS NOT NULL"
+                         " AND followed_by=1").fetchone()[0]
+    return {"by_status": rows, "followed_back": back}
+
+
 # ---------- misc ----------
 
 def kv_get(k, default=None):
@@ -553,3 +646,4 @@ def cleanup(days=10):
         c.execute("DELETE FROM snapshots WHERE ts < ?", (cut,))
         c.execute("DELETE FROM tweets WHERE last_seen < ?", (cut,))
         c.execute("DELETE FROM runs WHERE ts < ?", (cut,))
+        c.execute("DELETE FROM follow_candidates WHERE status IN ('new','dismissed') AND seen_at < ?", (cut,))

@@ -443,6 +443,172 @@ views.news = {
   },
 };
 
+/* Follow-back finder */
+const S_FOLLOW = { picked: new Set() };
+
+function markWords(text, words) {
+  let html = esc(text);
+  for (const w of words) {
+    if (!w) continue;
+    const e = esc(w).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    html = html.replace(new RegExp(e, "gi"), (m) => `<mark>${m}</mark>`);
+  }
+  return html;
+}
+function followStats(c) {
+  const diff = c.following - c.followers;
+  return `${esc(t("follow.following"))} <b>${num(c.following)}</b> · ${esc(t("follow.followers"))} <b>${num(c.followers)}</b>` +
+    ` · ${esc(t("follow.diff"))} <b class="${diff >= 0 ? "ok" : "bad"}">${diff >= 0 ? "+" : "−"}${num(Math.abs(diff))}</b>`;
+}
+function avatar(c) {
+  return c.avatar ? `<img class="av" src="${esc(safeUrl(c.avatar))}" alt="" referrerpolicy="no-referrer" loading="lazy">` : `<span class="av"></span>`;
+}
+
+async function followOne(c, btn) {
+  const auto = (S.status?.channel || "intent") !== "intent";
+  if (S.status?.demo) throw new Error(t("err.demo_mode"));
+  if (auto) {
+    const r = await api("/api/follow/queue", { ids: [c.user_id] });
+    toast(r.queued ? t("toast.follow_queued", { n: r.queued }) : t("follow.not_eligible"));
+    return;
+  }
+  const win = window.open("about:blank", "_blank");
+  try {
+    const r = await api("/api/follow/open", { id: c.user_id });
+    if (win) { win.opener = null; win.location.href = r.intent_url; toast(t("toast.follow_intent")); }
+    else toastLink(t("toast.popup_blocked"), r.intent_url, t("toast.open_x"));
+  } catch (e) { if (win) win.close(); throw e; }
+}
+
+views.follow = {
+  action: () => ({ text: S.status?.task === "follow_search" ? t("status.working") + "…" : t("action.follow_search"), disabled: !!S.status?.task }),
+  async onAction() {
+    const box = $("#fkw");
+    await api("/api/follow/search", box ? { keywords: box.value } : {});
+    loadStatus();
+  },
+  async load() {
+    const r = await api("/api/follow");
+    const main = $("#view");
+    const q = r.queue;
+    const auto = r.channel !== "intent";
+    const words = r.keywords;
+    S_FOLLOW.picked = new Set([...S_FOLLOW.picked].filter((id) => r.eligible.some((c) => c.user_id === id)));
+
+    const blocked = q.blocked ? " · " + t("follow.blocked." + q.blocked, { s: q.wait_sec, m: Math.ceil(q.wait_sec / 60) }) : "";
+    const head = h(`
+      <div class="fhead">
+        <div class="field" style="grid-template-columns:1fr auto;margin:14px 0 0">
+          <input id="fkw" type="text" placeholder="${esc(t("follow.keywords_ph"))}">
+          <button class="pill primary" data-f="search">${esc(t("action.follow_search"))}</button>
+        </div>
+        <p class="sub" style="margin-top:8px">${esc(t("follow.rules", { r: r.rules.max_ratio, n: r.rules.min_following, p: r.rules.min_posts }))}
+          <button class="link" data-go="settings" data-sec="follow">${esc(t("follow.change_rules"))}</button></p>
+        <div class="fbar">
+          <span>${esc(t("follow.quota", { d: q.day, md: q.max_day, h: q.hour, mh: q.max_hour }))}${q.queued ? " · " + esc(t("follow.queued_n", { n: q.queued })) : ""}${esc(blocked)}</span>
+          <span>${esc(t("follow.stats", { f: r.stats.by_status.followed || 0, b: r.stats.followed_back }))}</span>
+        </div>
+      </div>`);
+    $("#fkw", head).value = words.join(", ");
+    $('[data-f="search"]', head).onclick = (e) => guard(e.currentTarget, async () => {
+      const res = await api("/api/follow/search", { keywords: $("#fkw", head).value });
+      toast(res.started ? t("follow.searching") : t("learn.busy")); loadStatus();
+    });
+    $('[data-go="settings"]', head).addEventListener("click", () => { settingsSection = "follow"; try { localStorage.setItem("settingsSection", "follow"); } catch {} });
+
+    // eligible
+    const list = h(`<div class="flist"></div>`);
+    const batch = h(`<div class="fsel">${auto ? `<label class="toggle"><input type="checkbox" data-f="all"> ${esc(t("follow.select_all"))}</label>` : ""}
+      <span class="sub" style="margin:0">${esc(t("follow.eligible", { n: r.eligible.length }))}${r.searched_at ? " · " + esc(t("follow.searched", { ago: since(r.searched_at) })) : ""}</span>
+      <button class="pill primary small" data-f="batch" ${auto ? "" : "disabled"}></button>
+      ${auto ? "" : `<span class="fnote">${esc(t("follow.batch_intent"))} <button class="link" data-go="settings" data-sec="post">${esc(t("follow.change_channel"))}</button></span>`}</div>`);
+    const renderBatch = () => {
+      const n = S_FOLLOW.picked.size;
+      const b = $('[data-f="batch"]', batch);
+      b.textContent = t("follow.batch", { n });
+      b.disabled = !auto || !n;
+      const all = $('[data-f="all"]', batch);
+      if (all) all.checked = n > 0 && n === Math.min(r.eligible.length, SHOW);
+    };
+    const chan = $('[data-sec="post"]', batch);
+    if (chan) chan.addEventListener("click", () => { settingsSection = "post"; try { localStorage.setItem("settingsSection", "post"); } catch {} });
+    if ($('[data-f="all"]', batch)) $('[data-f="all"]', batch).onchange = (e) => {
+      S_FOLLOW.picked = e.target.checked ? new Set(r.eligible.slice(0, SHOW).map((c) => c.user_id)) : new Set();
+      $$("input[data-pick]", list).forEach((cb) => (cb.checked = e.target.checked));
+      renderBatch();
+    };
+    $('[data-f="batch"]', batch).onclick = (e) => guard(e.currentTarget, async () => {
+      const res = await api("/api/follow/queue", { ids: [...S_FOLLOW.picked] });
+      toast(t("toast.follow_queued", { n: res.queued }));
+      S_FOLLOW.picked.clear(); views.follow.load(); loadStatus();
+    });
+    const SHOW = 200;  // the rest appear as you follow or skip people
+    for (const c of r.eligible.slice(0, SHOW)) {
+      const row = h(`
+        <div class="frow">
+          ${auto ? `<input type="checkbox" data-pick="${esc(c.user_id)}" ${S_FOLLOW.picked.has(c.user_id) ? "checked" : ""}>` : ""}
+          ${avatar(c)}
+          <div class="fbody">
+            <div class="fname"><b>${esc(c.name)}</b> <span>@${esc(c.handle)}</span>
+              ${c.followed_by ? `<span class="chip sent">${esc(t("follow.follows_you"))}</span>` : ""}
+              ${c.status === "failed" ? `<span class="chip failed" title="${esc(c.error || "")}">${esc(t("follow.status.failed"))}</span>` : ""}</div>
+            <div class="fmatch"><span class="quiet">${esc(t("follow.source." + c.source))}</span> ${markWords((c.matched || c.bio || "").slice(0, 220), words)}</div>
+            <div class="fstats">${followStats(c)}</div>
+          </div>
+          <div class="facts">
+            <button class="pill small primary" data-a="follow">${esc(t("follow.follow"))}</button>
+            <a class="link" href="https://x.com/${encodeURIComponent(c.handle)}" target="_blank" rel="noopener noreferrer">${esc(t("follow.profile"))} ↗</a>
+            <button class="quiet" data-a="dismiss">${esc(t("follow.dismiss"))}</button>
+          </div>
+        </div>`);
+      const cb = $("input[data-pick]", row);
+      if (cb) cb.onchange = () => { cb.checked ? S_FOLLOW.picked.add(c.user_id) : S_FOLLOW.picked.delete(c.user_id); renderBatch(); };
+      $('[data-a="follow"]', row).onclick = (e) => guard(e.currentTarget, async () => { await followOne(c, e.currentTarget); row.remove(); S_FOLLOW.picked.delete(c.user_id); renderBatch(); loadStatus(); });
+      $('[data-a="dismiss"]', row).onclick = (e) => guard(e.currentTarget, async () => { await api("/api/follow/act", { ids: [c.user_id], action: "dismiss" }); row.remove(); S_FOLLOW.picked.delete(c.user_id); renderBatch(); });
+      list.append(row);
+    }
+    if (r.eligible.length > SHOW) list.append(h(`<p class="sub" style="padding-top:10px">${esc(t("follow.more", { n: r.eligible.length - SHOW }))}</p>`));
+    renderBatch();
+
+    // excluded, with the reason
+    const ex = h(`<details class="box fex"><summary><span>${esc(t("follow.excluded", { n: r.excluded.length }))}</span></summary><div></div></details>`);
+    for (const c of r.excluded) {
+      $("div", ex).append(h(`
+        <div class="frow small">${avatar(c)}
+          <div class="fbody"><div class="fname"><b>${esc(c.name)}</b> <span>@${esc(c.handle)}</span></div>
+            <div class="fstats">${followStats(c)}</div></div>
+          <span class="chip failed">${esc(t("follow.reason." + c.reason, { d: c.detail }))}</span>
+        </div>`));
+    }
+
+    // followed / queued, and who followed back
+    const done = h(`<details class="box fex" ${r.done.some((c) => c.status === "queued" || c.status === "opened") ? "open" : ""}><summary><span>${esc(t("follow.done", { n: r.done.length }))}</span></summary><div></div></details>`);
+    for (const c of r.done) {
+      const row = h(`
+        <div class="frow small">${avatar(c)}
+          <div class="fbody"><div class="fname"><b>${esc(c.name)}</b> <span>@${esc(c.handle)}</span>
+            ${c.status === "followed" && c.followed_by ? `<span class="chip sent">${esc(t("follow.back"))}</span>` : ""}</div>
+            <div class="fstats">${followStats(c)}${c.followed_at ? " · " + esc(since(c.followed_at)) : ""}</div></div>
+          <span class="chip ${esc(c.status)}">${esc(t("follow.status." + c.status))}</span>
+          <span class="facts"></span>
+        </div>`);
+      const acts = $(".facts", row);
+      const act = (label, action) => { const b = h(`<button class="link">${esc(label)}</button>`); b.onclick = () => guard(b, async () => { await api("/api/follow/act", { ids: [c.user_id], action }); views.follow.load(); }); acts.append(b); };
+      if (c.status === "queued") act(t("follow.cancel"), "cancel");
+      if (c.status === "opened") { act(t("follow.confirm"), "followed"); act(t("follow.not_followed"), "restore"); }
+      $("div", done).append(row);
+    }
+
+    const parts = [head];
+    if (!r.eligible.length && !r.excluded.length && !r.done.length) parts.push(h(`<div class="empty">${esc(t("follow.empty"))}</div>`));
+    else {
+      parts.push(h(`<h2>${esc(t("follow.candidates"))}</h2>`));
+      parts.push(r.eligible.length ? batch : h(`<p class="sub">${esc(t("follow.none_eligible"))}</p>`), list, ex, done);
+    }
+    main.replaceChildren(...parts);
+  },
+};
+
 /* Compose + drafts */
 views.compose = {
   action: () => ({ text: S.status?.drafting ? t("status.drafting") + "…" : t("action.more_drafts"), disabled: S.status?.drafting }),
@@ -659,6 +825,7 @@ const SECTIONS = [
   ["radar", ["AUTO_REFRESH", "REFRESH_MIN_MINUTES", "REFRESH_MAX_MINUTES", "SHOW_TOP", "SCRAPE_TARGET", "RECHECK_TOP", "TRENDS_EVERY_MINUTES", "WATCH_EVERY_MINUTES", "KEEP_DAYS"]],
   ["learn", ["FIT_REVIEW", "FIT_MIN_SCORE", "CONSOLIDATE_EVERY_DAYS", "EVAL_SAMPLES", "MINE_REFRESH_HOURS", "MINE_SCROLLS"]],
   ["drafts", ["DRAFT_HOUR", "NEWS_PER_DAY", "QUOTE_MIN_SCORE"]],
+  ["follow", ["FOLLOW_KEYWORDS", "FOLLOW_MAX_RATIO", "FOLLOW_MIN_FOLLOWING", "FOLLOW_MIN_POSTS", "FOLLOW_SEARCH_SCROLLS", "FOLLOW_MIN_INTERVAL_SEC", "FOLLOW_MAX_PER_HOUR", "FOLLOW_MAX_PER_DAY"]],
   ["general", ["UI_LANG", "CONTENT_LANG"]],
   ["mutes", []],
 ];
@@ -668,6 +835,8 @@ const UNITS = {
   SHOW_TOP: "posts", SCRAPE_TARGET: "posts", RECHECK_TOP: "posts", TRENDS_EVERY_MINUTES: "min", WATCH_EVERY_MINUTES: "min",
   KEEP_DAYS: "day", CONSOLIDATE_EVERY_DAYS: "day", EVAL_SAMPLES: "posts", MINE_REFRESH_HOURS: "hour", MINE_SCROLLS: "screens",
   DRAFT_HOUR: "oclock", NEWS_PER_DAY: "posts", FIT_MIN_SCORE: "points", QUOTE_MIN_SCORE: "points",
+  FOLLOW_MAX_RATIO: "times", FOLLOW_MIN_FOLLOWING: "people", FOLLOW_MIN_POSTS: "posts", FOLLOW_SEARCH_SCROLLS: "screens",
+  FOLLOW_MIN_INTERVAL_SEC: "sec", FOLLOW_MAX_PER_HOUR: "people", FOLLOW_MAX_PER_DAY: "people",
 };
 const HIDDEN_IN_PAIR = new Set(Object.values(PAIRS));
 
@@ -822,7 +991,7 @@ function xAccountBlock(st) {
 
 // ---------- navigation ----------
 
-const TABS = ["radar", "trends", "news", "compose", "queue", "learn", "settings"];
+const TABS = ["radar", "trends", "news", "follow", "compose", "queue", "learn", "settings"];
 
 function renderTabs() {
   $("#tabs").replaceChildren(...TABS.map((v) => {
