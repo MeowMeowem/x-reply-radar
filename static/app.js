@@ -199,6 +199,11 @@ async function loadStatus() {
 function renderStatus() {
   const s = S.status;
   if (!s) return;
+  const demo = $("#demo");
+  if (s.demo && demo.hidden) {
+    demo.innerHTML = esc(t("demo.banner")) + ` <a href="http://127.0.0.1:8796/">${esc(t("demo.real"))}</a>`;
+    demo.hidden = false;
+  }
   $("#me").textContent = s.handle ? "@" + s.handle : "";
   const v = views[S.view];
   const btn = $("#action");

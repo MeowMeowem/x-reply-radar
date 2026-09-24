@@ -54,6 +54,9 @@ button:hover { color: var(--ink); }
 button:disabled { color: var(--faint); cursor: default; }
 :focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; border-radius: 4px; }
 
+#demo { background: var(--violet); color: #fff; text-align: center; font-size: 13.5px; padding: 8px 16px; }
+#demo a { color: #fff; font-weight: 600; }
+
 /* ---------- header ---------- */
 body > header {
   position: sticky; top: 0; z-index: 5;
