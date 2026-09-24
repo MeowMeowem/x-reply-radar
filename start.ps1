@@ -7,4 +7,4 @@ if (-not (Test-Path .venv\Scripts\python.exe)) {
   .venv\Scripts\python.exe -m pip install -q -r requirements.txt
   .venv\Scripts\python.exe -m playwright install chromium
 }
-.venv\Scripts\python.exe app.py
+if ($args[0] -eq "--demo") { .venv\Scripts\python.exe scripts\demo.py @($args | Select-Object -Skip 1) } else { .venv\Scripts\python.exe app.py }

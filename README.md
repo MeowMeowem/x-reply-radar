@@ -38,9 +38,13 @@ nothing goes out without that click.
 ## Try it without an X account
 
 ```bash
-pip install -r requirements.txt
-python scripts/demo.py            # or: python scripts/demo.py --lang zh
+git clone https://github.com/MeowMeowem/x-reply-radar.git
+cd x-reply-radar
+./start.sh --demo            # or: ./start.sh --demo --lang zh
 ```
+
+(Windows: `.\start.ps1 --demo`.) The first run sets up a virtual environment, so you don't need to touch
+your system Python.
 
 This opens the full interface with made-up data on <http://127.0.0.1:8799>. Nothing in demo mode touches X or an AI provider.
 

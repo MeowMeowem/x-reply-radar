@@ -29,9 +29,12 @@
 ## 不登录 X 先看看
 
 ```bash
-pip install -r requirements.txt
-python scripts/demo.py --lang zh
+git clone https://github.com/MeowMeowem/x-reply-radar.git
+cd x-reply-radar
+./start.sh --demo --lang zh
 ```
+
+（Windows：`.\start.ps1 --demo --lang zh`。）第一次运行会自动建虚拟环境、装依赖，不用动系统里的 Python。
 
 会用编出来的数据打开完整界面（<http://127.0.0.1:8799>）。演示模式不会碰 X，也不会调用任何 AI 接口。
 
