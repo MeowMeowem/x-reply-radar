@@ -4,6 +4,8 @@
 
 [中文说明](README.zh-CN.md)
 
+![Hot posts ranked by growth, with two replies each and a fit score](docs/screenshots/en-radar.png)
+
 X Reply Radar runs on your own computer. It reads your X home timeline, trends and the official accounts you
 care about, ranks posts by how fast they are taking off, and drafts replies that sound like you, because it
 learns from what you have actually written. Every reply, quote post and post goes out with one click, and
@@ -24,6 +26,23 @@ nothing goes out without that click.
 - **Safe by default**: sending opens X with the text filled in and you press Post. Automatic sending is opt-in,
   rate-limited and queued.
 - English and Chinese, both for the interface and for the writing.
+
+| Learns your style, and shows whether it's working | Drafts you can edit, polish and send |
+|---|---|
+| ![Learn page](docs/screenshots/en-learn.png) | ![Compose page](docs/screenshots/en-compose.png) |
+| **Official accounts and blogs, one click to quote** | **Dark mode** |
+| ![Official news page](docs/screenshots/en-news.png) | ![Dark mode](docs/screenshots/en-radar-dark.png) |
+
+*Screenshots use the built-in demo data: every account, company and post in them is made up.*
+
+## Try it without an X account
+
+```bash
+pip install -r requirements.txt
+python scripts/demo.py            # or: python scripts/demo.py --lang zh
+```
+
+This opens the full interface with made-up data on <http://127.0.0.1:8799>. Nothing in demo mode touches X or an AI provider.
 
 ## Quick start
 
@@ -146,6 +165,7 @@ ai/             prompts, replies, fit review, learning and evaluation
 scraper/        X (home, profile, trends, watched accounts) and news feeds
 publisher/      intent links, headless browser sending, X API (OAuth 1.0a)
 prompts/zh|en/  prompt templates          profile.example/  starter persona
+scripts/demo.py demo mode with made-up data
 ```
 
 ## License

@@ -130,7 +130,7 @@ function editor(d, { onDone } = {}) {
   const el = h(`
     <div class="editor">
       <div class="label"><span>${esc(t("kind." + kind))}${d.angle ? " · " + esc(d.angle) : ""}</span>${fitBadge(d.score)}</div>
-      <textarea rows="2"></textarea>
+      <textarea rows="1"></textarea>
       ${d.url ? `<div class="basis">${esc(t("draft.quoting"))}: <a class="link" target="_blank" rel="noopener noreferrer" href="${esc(safeUrl(d.url))}">${esc(d.source || d.url)}</a></div>` : ""}
       ${d.based_on ? `<div class="basis">${esc(d.based_on)}</div>` : ""}
       <div class="row">
@@ -447,6 +447,7 @@ views.compose = {
     const composer = editor({ kind: "post", text: sessionStorage.getItem("compose") || "" });
     $('[data-do="drop"]', composer).remove();
     $("textarea", composer).placeholder = t("compose.placeholder");
+    $("textarea", composer).classList.add("tall");
     $("textarea", composer).addEventListener("input", (e) => { try { sessionStorage.setItem("compose", e.target.value); } catch {} });
     composer.addEventListener("click", (e) => { if (e.target.dataset.do === "send") try { sessionStorage.removeItem("compose"); } catch {} });
     const idea = h(`
@@ -606,10 +607,11 @@ function fitChart(evals) {
   const runOf = (p) => Math.floor(new Date(p.ts).getTime() / 600000);
   const runs = [...new Set(pts.map(runOf))].sort((a, b) => a - b);
   const X = (p) => pad + (runs.length === 1 ? (W - 2 * pad) / 2 : (runs.indexOf(runOf(p)) / (runs.length - 1)) * (W - 2 * pad));
-  const Y = (s) => H - pad - ((s - 1) / 9) * (H - 2 * pad);
+  const lo = Math.max(0, Math.floor(Math.min(...pts.map((p) => p.score))) - 1);  // zoom in on the range that's used
+  const Y = (s) => H - pad - ((s - lo) / (10 - lo)) * (H - 2 * pad);
   const colors = { current: "var(--violet)", candidate: "var(--pink)", baseline: "var(--faint)" };
   let svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${esc(t("learn.chart"))}">`;
-  for (const g of [2, 4, 6, 8, 10]) svg += `<line x1="${pad}" x2="${W - pad}" y1="${Y(g)}" y2="${Y(g)}" stroke="var(--line)"/><text x="4" y="${Y(g) + 4}" font-size="10" fill="var(--muted)">${g}</text>`;
+  for (const g of [2, 4, 6, 8, 10].filter((g) => g >= lo)) svg += `<line x1="${pad}" x2="${W - pad}" y1="${Y(g)}" y2="${Y(g)}" stroke="var(--line)"/><text x="4" y="${Y(g) + 4}" font-size="10" fill="var(--muted)">${g}</text>`;
   for (const [label, color] of Object.entries(colors)) {
     const series = pts.filter((p) => p.label === label);
     if (!series.length) continue;
